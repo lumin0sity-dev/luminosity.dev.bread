@@ -1,0 +1,13 @@
+{
+  "name": "eaglercraftx-reimpl-server",
+  "version": "1.0.0",
+  "description": "Simple WebSocket authoritative server for the EaglercraftX-like demo",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.13.0",
+    "uuid": "^9.0.0"
+  }
+}
