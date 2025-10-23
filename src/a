@@ -1,0 +1,121 @@
+// Simple WebSocket server for block/world synchronization
+// Usage: `node index.js` (defaults to port 3000). Worlds are saved under server/worlds/<room>.json
+
+const WebSocket = require('ws');
+const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const SAVE_DIR = path.join(__dirname, 'worlds');
+if (!fs.existsSync(SAVE_DIR)) fs.mkdirSync(SAVE_DIR, { recursive: true });
+
+const wss = new WebSocket.Server({ port: PORT });
+console.log('WebSocket server listening on', PORT);
+
+// rooms: roomId -> { clients: Map(clientId -> ws), world: Map(key->type) }
+const rooms = new Map();
+
+function worldKey(x,y,z){ return `${x},${y},${z}`; }
+
+function loadWorld(roomId){
+  const p = path.join(SAVE_DIR, `${roomId}.json`);
+  if (fs.existsSync(p)){
+    try {
+      const raw = fs.readFileSync(p, 'utf8');
+      const arr = JSON.parse(raw);
+      const map = new Map();
+      for (const b of arr) map.set(worldKey(b.x,b.y,b.z), b.type);
+      return map;
+    } catch(e){ console.error('Failed read world', e); }
+  }
+  return new Map();
+}
+function saveWorld(roomId, map){
+  const arr = [];
+  for (const [k,t] of map.entries()){
+    const [x,y,z] = k.split(',').map(Number);
+    arr.push({ x,y,z, type: t });
+  }
+  const p = path.join(SAVE_DIR, `${roomId}.json`);
+  fs.writeFileSync(p, JSON.stringify(arr), 'utf8');
+}
+
+// handle new connection
+wss.on('connection', function connection(ws, req) {
+  // parse room from query ?room=...
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const roomId = url.searchParams.get('room') || 'default';
+  if (!rooms.has(roomId)) {
+    const worldMap = loadWorld(roomId);
+    rooms.set(roomId, { clients: new Map(), world: worldMap });
+    console.log('Created room', roomId, 'blocks=', worldMap.size);
+  }
+  const room = rooms.get(roomId);
+
+  const clientId = uuidv4();
+  room.clients.set(clientId, ws);
+  console.log('Client joined', clientId, 'room', roomId);
+
+  // send welcome + world snapshot
+  const worldArr = [];
+  for (const [k,t] of room.world.entries()){
+    const [x,y,z] = k.split(',').map(Number);
+    worldArr.push({x,y,z,type:t});
+  }
+  ws.send(JSON.stringify({ type:'welcome', id: clientId, world: worldArr }));
+
+  // broadcast new player's presence (optional)
+  // ws.send(JSON.stringify({ type:'player_state', id: clientId, pos:{x:0,y:5,z:0}, rot:{x:0,y:0} }));
+
+  ws.on('message', function incoming(message) {
+    try {
+      const msg = JSON.parse(message.toString());
+      if (!msg.type) return;
+      switch (msg.type) {
+        case 'player_update':
+          // broadcast to others
+          for (const [id, c] of room.clients.entries()){
+            if (id === msg.id) continue;
+            if (c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ type:'player_state', id: msg.id, pos: msg.pos, rot: msg.rot }));
+          }
+          break;
+        case 'block_change':
+          // validate coords/types a bit
+          if (typeof msg.x !== 'number' || typeof msg.y !== 'number' || typeof msg.z !== 'number') break;
+          const allowedTypes = [0,1,2,3,4,5,6];
+          const t = msg.block;
+          if (!allowedTypes.includes(t)) break;
+          // set in authoritative world
+          const k = worldKey(msg.x,msg.y,msg.z);
+          if (t === 0) room.world.delete(k); else room.world.set(k, t);
+          // persist world (simple immediate save)
+          saveWorld(roomId, room.world);
+          // broadcast to all clients
+          for (const [id, c] of room.clients.entries()){
+            if (c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ type:'block_change', x:msg.x, y:msg.y, z:msg.z, block: t }));
+          }
+          break;
+        default:
+          // ignore
+          break;
+      }
+    } catch (e) {
+      console.error('Bad message', e);
+    }
+  });
+
+  ws.on('close', () => {
+    room.clients.delete(clientId);
+    console.log('Client left', clientId);
+    // broadcast disconnect
+    for (const [id, c] of room.clients.entries()){
+      if (c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ type:'player_disconnect', id: clientId }));
+    }
+    // if no clients left, optionally save and drop room
+    if (room.clients.size === 0) {
+      // keep world for later but do not keep in memory if you want; we persist to disk already.
+      console.log('Room empty', roomId);
+    }
+  });
+});
