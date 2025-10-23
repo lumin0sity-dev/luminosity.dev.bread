@@ -1,0 +1,81 @@
+// Simple chunk helper for instanced rendering
+// Each chunk is CHUNK_SIZE^3 blocks. We use InstancedMesh to render repeated cubes per type.
+
+import * as THREE from 'https://unpkg.com/three@0.155.0/build/three.module.js';
+
+export const CHUNK_SIZE = 16;
+export const INSTANCE_LIMIT = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+
+// Basic Chunk object that holds instanced meshes by block type
+export class Chunk {
+  constructor(chunkX, chunkZ, scene, cubeGeo, materialByType) {
+    this.chunkX = chunkX;
+    this.chunkZ = chunkZ;
+    this.scene = scene;
+    this.cubeGeo = cubeGeo;
+    this.materialByType = materialByType;
+
+    // instanced meshes per type ID
+    this.instances = {}; // type -> {mesh, count}
+    this.positions = new Map(); // key 'x,y,z' -> type
+  }
+
+  keyLocal(x,y,z){ return `${x},${y},${z}`; }
+
+  setBlock(localX, y, localZ, type){
+    const k = this.keyLocal(localX,y,localZ);
+    if (type === 0) {
+      this.positions.delete(k);
+    } else {
+      this.positions.set(k, type);
+    }
+    // rebuild instanced meshes lazily
+    this._needsRebuild = true;
+  }
+
+  getBlock(localX, y, localZ){
+    return this.positions.get(this.keyLocal(localX,y,localZ)) || 0;
+  }
+
+  rebuild(worldX, worldZ){
+    // remove existing instance meshes
+    for (const t in this.instances){
+      const im = this.instances[t].mesh;
+      this.scene.remove(im);
+      im.geometry.dispose?.();
+      im.material.dispose?.();
+    }
+    this.instances = {};
+
+    // group positions by type
+    const byType = {};
+    for (const [k, t] of this.positions.entries()){
+      const parts = k.split(',').map(Number);
+      const lx = parts[0], y = parts[1], lz = parts[2];
+      if (!byType[t]) byType[t] = [];
+      // compute world position for instance center
+      const wx = (worldX * CHUNK_SIZE + lx) + 0.5;
+      const wy = (y) + 0.5;
+      const wz = (worldZ * CHUNK_SIZE + lz) + 0.5;
+      byType[t].push(new THREE.Vector3(wx, wy, wz));
+    }
+
+    for (const t in byType){
+      const mat = this.materialByType[t];
+      if (!mat) continue;
+      const instances = byType[t];
+      const instMesh = new THREE.InstancedMesh(this.cubeGeo, mat, Math.max(1, instances.length));
+      const dummy = new THREE.Object3D();
+      let i = 0;
+      for (const pos of instances){
+        dummy.position.copy(pos);
+        dummy.updateMatrix();
+        instMesh.setMatrixAt(i++, dummy.matrix);
+      }
+      instMesh.count = i;
+      this.scene.add(instMesh);
+      this.instances[t] = { mesh: instMesh, count: i };
+    }
+    this._needsRebuild = false;
+  }
+}
