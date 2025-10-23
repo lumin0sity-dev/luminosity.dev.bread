@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EaglercraftX-like Demo (multiplayer)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="hud">Click to lock pointer • WASD + mouse • Space/Shift • Left = break • Right = place • 1-9 switch</div>
+  <div id="crosshair">+</div>
+  <div id="info">Mode: Creative</div>
+
+  <div id="netControls" class="panel">
+    <label>Server URL: <input id="serverUrl" value="ws://localhost:3000" /></label>
+    <label>Room: <input id="roomId" value="default" /></label>
+    <button id="connectBtn">Connect</button>
+    <span id="connStatus">Disconnected</span>
+  </div>
+
+  <div id="hotbar"></div>
+
+  <div id="topRight" class="panel">
+    <button id="saveBtn">Save</button>
+    <button id="loadBtn">Load</button>
+    <button id="exportBtn">Export</button>
+    <input type="file" id="importFile" style="display:none" />
+    <button id="importBtn">Import</button>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
