@@ -1,0 +1,8 @@
+node_modules/
+server/node_modules/
+server/worlds/
+.DS_Store
+*.log
+
+index.html
+v4
